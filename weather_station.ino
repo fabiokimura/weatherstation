@@ -518,7 +518,7 @@ void desenhaHoras() {
 
 
 void desenhaPrevisao() {
-  String current = "http://api.openweathermap.org/data/2.5/forecast?lat=-23.525072&lon=-46.610224&lang=pt&&units=metric&APPID=" + key;
+  String current = "http://api.openweathermap.org/data/2.5/forecast?" + lugar + "&lang=pt&units=metric&APPID=" + key;
   Serial.println(current);
   printWifi();
   if ((WiFi.status() == WL_CONNECTED)) { //Check the current connection status
