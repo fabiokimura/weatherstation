@@ -1,12 +1,8 @@
 /*
-
+   ESP8266, TFT ILI9341 240x320, sensor DHT22
    Weather Station
    by Fabio Kimura
-
-   ESP8266
-   TFT ILI9341 240x320 color
-   DHT22
-
+   fkimura@gmail.com
 */
 
 #include "ESP8266WiFi.h"
@@ -14,7 +10,6 @@
 #include "ArduinoJson.h"
 #include "SPI.h"
 #include "DHT.h"
-
 
 // bibliotecas Adafruit
 #include "Adafruit_GFX.h"
@@ -28,23 +23,12 @@
 #include "fonts/OpenSansBold30pt7b.h"
 #include "fonts/FreeSerifBold9pt7b.h"
 #include "fonts/FreeSerif9pt7b.h"
-
+// Icones em bmp convertidos para bytes
 #include "icons.h"
+// configure a rede wifi e a localizacao aqui:
+#include "configure.h"
 
-// WIFI
-String ssid1 = "<ssid1>";
-String ssid2 = "<ssid2>";
-const char* password =  "coloquesuasenhaaqui";
-
-
-// OPENWEATHER API 
-String key = "<openweathermap api key>";
-String lugar = "lat=-23.525072&lon=-46.620224"; // sao paulo - vila mariana, pegue as coordenadas do seu local no google maps
-// Time zone
-int timezone = -3;
-// 24H/12H time format (0 = 24H, 1 = 12H)
-byte time_format = 0;
-
+boolean controleVentilador = false;
 
 // Cores
 #define ILI9341_GRAY 0x734D
@@ -85,6 +69,7 @@ void setup() {
   dht.begin(); // inicializa o sensor DHT
 
   pinMode(BUTTON_PIN, INPUT); 
+ // attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), verificaBotao, FALLING); 
 
   tft.begin();
   //  tft.setRotation(2);
@@ -100,6 +85,7 @@ void setup() {
   printWifi();
 }
 
+int botao = 0;
 void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     connectWifi();
@@ -108,6 +94,7 @@ void loop() {
   desenhaTempUmidade();
   getCurrentWeather();
   desenhaHoras();
+  botao = 0;
   for (int i = 0; i < 60; i++) {
     desenhaTempUmidade();
     for (int j = 0; j < 60; j++) {
@@ -119,15 +106,14 @@ void loop() {
 
 void verificarBotao() {
   if (digitalRead(BUTTON_PIN) == LOW) {
-    trocaPrevisao();  
+    botao++;
+    if (botao >= 4) {
+      botao = 0;
+      controleVentilador = !controleVentilador;
+      desenhaVentilador(); 
+    }
+    trocaPrevisao(); 
   }
-}
-
-void chamarURL(String url) {
-  HTTPClient http;
-  http.begin(url);
-  int httpCode = http.GET();    
-
 }
 void connectWifi() {
   String ssid = ssid2;
@@ -278,7 +264,7 @@ void getCurrentWeather() {
 
       tft.setFont(&OpenSansBold9pt7b);
 
-      tft.fillRect(50, 253, 268, 39, ILI9341_BLACK);
+      tft.fillRect(50, 253 , 268, 39, ILI9341_BLACK);
 
       drawBitmap("/wi-strong-wind.bmp", 5, 250);
 
@@ -319,7 +305,15 @@ void getCurrentWeather() {
   }
 }
 
-
+void desenhaVentilador() {
+  tft.setFont(&OpenSansBold9pt7b);
+  tft.setCursor(8, 192);
+  if (controleVentilador) {
+    tft.print("+");
+  } else {
+    tft.fillRect(8, 192 - 11 , 12, 12, ILI9341_BLACK);
+  }
+}
 
 void printRow(int x, int y, float volume, char *icon, String unit, int decimal) {
 
@@ -426,6 +420,17 @@ int intTime(String timestamp) {
   return result;
 }
 
+
+int chamarURL(String url) {
+  HTTPClient http;
+  http.begin(url);
+  http.setTimeout(30000);
+  int httpCode = http.GET();
+  http.end();
+  Serial.println(httpCode); 
+  return httpCode;
+}
+
 boolean ventiladorLigado = false;
 
 void desenhaTempUmidade() {
@@ -460,26 +465,31 @@ void desenhaTempUmidade() {
   tft.setCursor(182, 182);
   tft.print(umidade);
   tft.println(" %");
-
+  int resultado = 0;
   tft.setCursor(182, 202);
-  if (temperatura >= 27 && !ventiladorLigado) {
-    chamarURL("http://192.168.1.249/ligarVentilador.php");
-    ventiladorLigado = true;
-    drawBitmap("/weather/fan-on.bmp", 190, 189);
+  if (controleVentilador && temperatura >= 27 && !ventiladorLigado) {
+    resultado = chamarURL("http://192.168.1.149/mqtt/ligarVentilador.php");
+    if (resultado > 0 ) {
+      ventiladorLigado = true;
+      drawBitmap("/weather/fan-on.bmp", 190, 189);
+    }
   }
-  if (temperatura <= 26 && ventiladorLigado) {
-    chamarURL("http://192.168.1.249/desligarVentilador.php");
-    ventiladorLigado = false;
-    tft.fillRect(190, 189, 40, 40, ILI9341_BLACK);
+  if (controleVentilador && temperatura <= 25 && ventiladorLigado) {
+    resultado = chamarURL("http://192.168.1.149/mqtt/desligarVentilador.php");
+    if (resultado > 0 ) {
+      ventiladorLigado = false;
+      tft.fillRect(190, 189, 40, 40, ILI9341_BLACK);
+    }
   }
- 
+  Serial.print("resultado=");
+  Serial.println(resultado);
 }
 
 String semana[7] = { "dom", "seg", "ter", "qua", "qui", "sex", "sab" };
 void desenhaHoras() {
   HTTPClient http;  //Declare an object of class HTTPClient
   http.begin("http://worldtimeapi.org/api/timezone/America/Sao_Paulo");  //Specify request destination
-  int httpCode = http.GET();                                                                  //Send the request
+  int httpCode = http.GET(); //Send the request
   if (httpCode > 0) { //Check the returning code
     String payload = http.getString();   //Get the request response payload
     Serial.println(payload);
@@ -500,8 +510,8 @@ void desenhaHoras() {
     tft.print(semana[dow] + " ");
     tft.println(time);
 
-    if (horas >= 3 && horas <= 6) {
-      analogWrite(TFT_LED, 48);
+    if (horas >= 2 && horas <= 6) {
+      analogWrite(TFT_LED, 32);
     } else if (horas >= 0 && horas <= 7) {
       analogWrite(TFT_LED, 64);
     } else if (horas >= 20) {
@@ -511,6 +521,9 @@ void desenhaHoras() {
     } else {
       digitalWrite(TFT_LED, HIGH);
     }
+    if (horas == 10) {
+      controleVentilador = false;
+    }
   }
   http.end();   //Close connection
 }
@@ -518,7 +531,7 @@ void desenhaHoras() {
 
 
 void desenhaPrevisao() {
-  String current = "http://api.openweathermap.org/data/2.5/forecast?" + lugar + "&lang=pt&units=metric&APPID=" + key;
+  String current = "http://api.openweathermap.org/data/2.5/forecast?"+lugar+"&lang=pt&units=metric&APPID=" + key;
   Serial.println(current);
   printWifi();
   if ((WiFi.status() == WL_CONNECTED)) { //Check the current connection status
